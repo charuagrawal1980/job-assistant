@@ -8,6 +8,10 @@ import markdownify
 import markdown
 from spire.doc import *
 from spire.doc.common import *
+
+from docx import Document
+from docx.shared import Pt
+from bs4 import BeautifulSoup
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -22,15 +26,11 @@ def get_wordfile_markdown(filename)->str:
         markdown = markdownify.markdownify(html)
         return markdown
     
-def save_markdowntext_to_word(markdown_text, state):
-    filename = state if state else f"tailored_resume_{datetime.now().strftime('%Y%m%d_%H%M%S')}.docx"
-    html = markdown.markdown(markdown_text)
-    with open("output.md", "w", encoding='utf-8') as md_file:
-        md_file.write(html)
-    document = Document()
-    document.LoadFromFile("output.md")
-    document.SaveToFile(filename, FileFormat.Docx2019)
-    return filename
+def save_markdowntext_to_word(markdown_text, filename):
+    html_content = markdown.markdown(markdown_text)
+    doc = Document()
+    add_html_to_doc(doc, html_content)
+    doc.save(filename + ".docx")
 
 def save_resume_to_pdf(text: str) -> str:
 
@@ -75,8 +75,77 @@ def get_jobs_from_excel(fileame):
             "company_name": str(row['company_name']).strip(),
             "job_location": "",
             "job_description": str(row['job_description']).strip(),
-            "job_title":row['job_title']
+            "job_title":row['job_title'],
+            "job_url": row['job_url']
         }
             json_data.append(job_entry)
     
         return json_data
+
+def add_html_to_doc(doc, html_content):
+
+    """Parses HTML content and adds it to the Word document with appropriate formatting."""
+    soup = BeautifulSoup(html_content, "html.parser")
+    
+    def process_element(element, parent_paragraph=None):
+        if isinstance(element, str):
+            if parent_paragraph:
+                parent_paragraph.add_run(element)
+            else:
+                doc.add_paragraph(element)
+            return
+
+        if element.name in ["h1", "h2", "h3", "h4", "h5", "h6"]:
+            p = doc.add_paragraph()
+            run = p.add_run(element.get_text())
+            run.bold = True
+            font_size = {
+                "h1": 16, "h2": 14, "h3": 12,
+                "h4": 11, "h5": 10, "h6": 10
+            }
+            run.font.size = Pt(font_size.get(element.name, 10))
+            
+        elif element.name == "p":
+            p = doc.add_paragraph()
+            for child in element.children:
+                process_element(child, p)
+                
+        elif element.name == "ul":
+            for li in element.find_all("li", recursive=False):
+                p = doc.add_paragraph(style="List Bullet")
+                for child in li.children:
+                    process_element(child, p)
+                    
+        elif element.name == "ol":
+            for li in element.find_all("li", recursive=False):
+                p = doc.add_paragraph(style="List Number")
+                for child in li.children:
+                    process_element(child, p)
+                    
+        elif element.name in ["strong", "b"]:
+            run = parent_paragraph.add_run(element.get_text())
+            run.bold = True
+            
+        elif element.name in ["em", "i"]:
+            run = parent_paragraph.add_run(element.get_text())
+            run.italic = True
+            
+        elif element.name == "a":
+            run = parent_paragraph.add_run(f"{element.get_text()} ({element.get('href', '')})")
+            run.underline = True
+            
+        else:
+            # Process all child elements
+            for child in element.children:
+                process_element(child)
+
+    # Process the document
+    for element in soup.body.children if soup.body else soup.children:
+        if isinstance(element, str) and element.strip() == "":
+            continue
+        process_element(element)
+
+    return doc
+
+def download_all_resumes():
+    return ""

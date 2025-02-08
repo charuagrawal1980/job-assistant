@@ -33,14 +33,13 @@ For the Professional Experience Section:
 VERY IMPORTANT- Do not fabricate data. Only modify/add data that can be inferred from the original resume. 
 **Output:**
 
-Generate the output as a json dictionary with the folllowing structure:
-{{
-  "before": #calculate ATS matching score between orginal resume and the job profile
-  "after": #calculate ATS matching score between tailored resume and the job profile
-  "changes": #List of all changes made to the resume. This would be a text field with list of changes separated by commas
-  "tailored_resume": #tailored resume in the same markdown format as the original resume. The only update should be the content of the resume
-}}
-Make sure the json output is clean and has no extra characters.
+Generate the output as a json dictionary with the folllowing fields:
+
+  "Before": #calculate ATS matching score between orginal resume and the job profile
+  "After": #calculate ATS matching score between tailored resume and the job profile
+  "Changes": #List of all changes made to the resume. This would be a text field with list of changes separated by commas
+  "TailoredResume": #tailored resume in the same markdown format as the original resume. The only update should be the content of the resume
+
 '''
 
 
@@ -114,10 +113,11 @@ Follow these steps exactly:
         "job_salary": "salary1",
         "job_description": "description1"
     }}
-    ...
+    
 ]
 
 Important:
+- The json should be properly formatted and make sure the starting and ending braces are present.
 - Ensure you return exactly {job_count} jobs in the array.
 - Confirm that **each job listing has the correct corresponding job description**.
 - Extract the job description **immediately after clicking on the job** and before moving to the next job.

@@ -8,8 +8,16 @@ from config import Config
 from utils import get_resume_text, get_wordfile_markdown
 from prompts import TAILORING_PROMPT, JOB_SEARCH_PROMPT, TAILORING_PROMPT_1
 from browser_use import BrowserConfig, Browser, Agent
-
+from langchain.output_parsers import PydanticOutputParser
+from langchain_core.pydantic_v1 import BaseModel, Field
+from decimal import Decimal
 logger = logging.getLogger(__name__)
+
+class TailoredResume(BaseModel):
+    Before: Decimal
+    After: Decimal
+    Changes: str
+    TailoredResume: str
 
 class AirtableManager:
     def __init__(self):
@@ -42,7 +50,7 @@ class AirtableManager:
             logger.error(f"Error updating record: {str(e)}", exc_info=True)
             return {}
 
-    def add_new_record(self, job_profile: Dict, filename) -> Dict:
+    def add_new_record(self, job_profile: Dict, filename, customer_name, customer_email_address) -> Dict:
    
         try:
             resume_text = get_wordfile_markdown(filename)
@@ -53,12 +61,21 @@ class AirtableManager:
                 "status": "new",
                 "created_date": datetime.now().isoformat(),
                 'company_name': job_profile['company_name'],
-                'original_resume': resume_text
+                'original_resume': resume_text,
+                'customer_name': customer_name,
+                'customer_email_address': customer_email_address,
+                'job_url':job_profile['job_url']
+
             }
             return self.table.create(new_fields)
         except Exception as e:
             logger.error(f"Error adding new record: {str(e)}", exc_info=True)
             return {}
+
+    def update_state_to_applied(self, selected_row):
+        selectedrow = selected_row
+        selectedrow["status"] = "applied"
+        return ""
 
 class LinkedInScraper:
     def __init__(self, llm):
@@ -127,15 +144,18 @@ class ResumeGenerator:
                 resume_text=resume_text,
                 job_description=job_description
             )
-            response = (self.llm.invoke(final_prompt).content)
-            cleaned_response = self.clean_llm_response(response)
-            if cleaned_response=="json_error": 
-                response = (self.llm.invoke(final_prompt).content)
-                cleaned_response = self.clean_llm_response(response)
-            return cleaned_response
+            parser = PydanticOutputParser(pydantic_object=TailoredResume)
+            chain = self.llm | parser
+            #response = (self.llm.invoke(final_prompt).content)
+            response = chain.invoke(final_prompt)
+            #cleaned_response = self.clean_llm_response(response)
+            #if cleaned_response.values[0]=="json_error": 
+             #   response = (self.llm.invoke(final_prompt).content)
+              #  cleaned_response = self.clean_llm_response(response)
+            return response
         except Exception as e:
             logger.error(f"Error generating resume: {str(e)}", exc_info=True)
-            return ""
+            return "error"
         
 
     def generate_tailored_resume(
@@ -143,16 +163,7 @@ class ResumeGenerator:
         resume_filename: str, 
         job_description: str
     ) -> str:
-        """
-        Generate a tailored resume based on job description.
-        
-        Args:
-            resume_filename: Path to original resume
-            job_description: Job description to tailor resume for
-            
-        Returns:
-            str: Tailored resume content
-        """
+       
         try:
             resume_text = get_resume_text(resume_filename)
             final_prompt = TAILORING_PROMPT.format(
