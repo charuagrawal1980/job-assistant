@@ -5,8 +5,8 @@ from pyairtable import Api
 from pyairtable.formulas import match
 import json
 from config import Config
-from utils import get_resume_text
-from prompts import TAILORING_PROMPT, JOB_SEARCH_PROMPT
+from utils import get_resume_text, get_wordfile_markdown
+from prompts import TAILORING_PROMPT, JOB_SEARCH_PROMPT, TAILORING_PROMPT_1
 from browser_use import BrowserConfig, Browser, Agent
 
 logger = logging.getLogger(__name__)
@@ -42,15 +42,18 @@ class AirtableManager:
             logger.error(f"Error updating record: {str(e)}", exc_info=True)
             return {}
 
-    def add_new_record(self, job_profile: Dict) -> Dict:
-        """Add a new job profile record to Airtable."""
+    def add_new_record(self, job_profile: Dict, filename) -> Dict:
+   
         try:
+            resume_text = get_wordfile_markdown(filename)
             new_fields = {
-                "job_title": f"{job_profile['job_title']} at {job_profile['company_name']} in {job_profile['job_location']}",
+                "job_title": job_profile['job_title'],
                 "job_description": f"{job_profile['job_description']}",
                 "tailored_resume": "",
                 "status": "new",
                 "created_date": datetime.now().isoformat(),
+                'company_name': job_profile['company_name'],
+                'original_resume': resume_text
             }
             return self.table.create(new_fields)
         except Exception as e:
@@ -67,15 +70,7 @@ class LinkedInScraper:
         self.browser = Browser(config=self.config)
 
     async def run_job_search(self, job_count: int) -> Dict:
-        """
-        Run LinkedIn job search and return results.
-        
-        Args:
-            job_count: Number of jobs to scrape
-            
-        Returns:
-            Dict containing job information
-        """
+      
         try:
             task = JOB_SEARCH_PROMPT.format(
                 username=self.username,
@@ -105,9 +100,43 @@ class LinkedInScraper:
             return {}
 
 class ResumeGenerator:
+
     def __init__(self, llm):
         """Initialize resume generator."""
         self.llm = llm
+
+    def clean_llm_response(self, response: str) -> dict:
+        try:
+            # Remove markdown code block indicators and newlines
+            cleaned = response.replace('```json', '').replace('```', '').strip()
+            # Parse the cleaned string into JSON
+            return json.loads(cleaned)
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse LLM response: {str(e)}")
+            return {"json_error"}
+        
+    def generate_tailored_resume_markdown(
+        self, 
+        resume_filename: str, 
+        job_description: str
+    ) -> str:
+       
+        try:
+            resume_text = get_wordfile_markdown(resume_filename)
+            final_prompt = TAILORING_PROMPT_1.format(
+                resume_text=resume_text,
+                job_description=job_description
+            )
+            response = (self.llm.invoke(final_prompt).content)
+            cleaned_response = self.clean_llm_response(response)
+            if cleaned_response=="json_error": 
+                response = (self.llm.invoke(final_prompt).content)
+                cleaned_response = self.clean_llm_response(response)
+            return cleaned_response
+        except Exception as e:
+            logger.error(f"Error generating resume: {str(e)}", exc_info=True)
+            return ""
+        
 
     def generate_tailored_resume(
         self, 
