@@ -12,17 +12,19 @@ class GradioUI:
     full_df_state: pd.DataFrame
     selected_row: gr.SelectData
     selected_record_id: str
+    customer_email :str
     def __init__(self, airtable_manager, linkedin_scraper, resume_generator):
         """Initialize Gradio UI components."""
         self.airtable_manager = airtable_manager
         self.linkedin_scraper = linkedin_scraper
         self.resume_generator = resume_generator
         self.selected_row = None
-        
+        self.customer_email = None
     def get_dashboard_data(self) -> Tuple[pd.DataFrame, pd.DataFrame]:
        
         try:
-            records = self.airtable_manager.get_all_records()
+            #records = self.airtable_manager.get_all_records()
+            records = self.airtable_manager.get_all_records_by_customer(self.customer_email)
             df = pd.DataFrame(columns=[
                 'record_id','customer_name', 'customer_email_address', 'job_title', 'job_url','resume_generated_date', 'original_resume','company_name',
                 'status', 'tailored_resume', 'before','after','changes', 'tailored_resume_filename', 'created_date', 
@@ -87,7 +89,7 @@ class GradioUI:
         customer_name: str,
         customer_email: str
     ) -> str:
-        """Process resume and job files."""
+        self.customer_email = customer_email
         jobs={}
         
         if job_search_type == "Search":
@@ -144,6 +146,7 @@ class GradioUI:
                                 label="Customer Email",
                                 placeholder="Enter customer email"
                             )
+                            customer_email.change(fn=self.customer_changed, inputs=[customer_email])
                     
                     # Second Row - Split into two columns
                     with gr.Row():
@@ -189,6 +192,7 @@ class GradioUI:
                             download_button = gr.Button("Download Resume", size="sm")
                             download_all_button = gr.Button("Download All", size="sm")
                             change_to_applied = gr.Button("Applied", size="sm")
+                            get_records_created_today = gr.Button("Today's records", size="sm")
                             # Set click events for buttons
                            
                         
@@ -253,7 +257,11 @@ class GradioUI:
 
             return demo
         
-    
+    def customer_changed(self,email):
+         self.customer_email = email
+
+    def get_records_created_today(self, email):
+        return ""
     def update_applied_status(self):
 
         if self.selected_row is not None:

@@ -11,6 +11,7 @@ from browser_use import BrowserConfig, Browser, Agent
 from langchain.output_parsers import PydanticOutputParser
 from langchain_core.pydantic_v1 import BaseModel, Field
 from decimal import Decimal
+
 logger = logging.getLogger(__name__)
 
 class TailoredResume(BaseModel):
@@ -28,11 +29,37 @@ class AirtableManager:
     def get_all_records(self) -> List[Dict]:
         """Fetch all records from Airtable."""
         try:
+
             return self.table.all()
         except Exception as e:
             logger.error(f"Error fetching records: {str(e)}", exc_info=True)
             return []
 
+    def get_all_records_by_customer(self, customer_email) -> List[Dict]:
+      
+        try:
+            formula = match({"customer_email_address": customer_email})
+            return self.table.all(formula=formula)
+        except Exception as e:
+            logger.error(f"Error fetching records: {str(e)}", exc_info=True)
+            return []
+    
+    def get_all_records_by_customer_today(self, customer_email) -> List[Dict]:
+      
+        try:
+            today_date = datetime.now().date().isoformat()  # Get today's date in ISO format
+            # Create a formula string to match the date part
+            formula_string = "AND({customer_email_address} = '{}', IS_SAME({createdDate}, '{}', 'day'))".format(customer_email, today_date)
+            #formula = match({
+            #"customer_email_address": customer_email,
+            #"createdDate": today_date
+            #})
+           
+            return self.table.all(formula=formula_string)
+        except Exception as e:
+            logger.error(f"Error fetching records: {str(e)}", exc_info=True)
+            return []
+        
     def get_new_records(self) -> List[Dict]:
         """Fetch records with 'new' status."""
         try:
