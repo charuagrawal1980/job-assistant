@@ -5,11 +5,20 @@ from pyairtable import Api
 from pyairtable.formulas import match
 import json
 from config import Config
-from utils import get_resume_text
-from prompts import TAILORING_PROMPT, JOB_SEARCH_PROMPT
-from browser_use import BrowserConfig, Browser, Agent
-
+from utils import get_resume_text, get_wordfile_markdown
+from prompts import TAILORING_PROMPT, JOB_SEARCH_PROMPT, TAILORING_PROMPT_1
+#from browser_use import BrowserConfig, Browser, Agent
+from langchain.output_parsers import PydanticOutputParser
+from langchain_core.pydantic_v1 import BaseModel, Field
+from decimal import Decimal
+from prompts import Prompts
 logger = logging.getLogger(__name__)
+
+class TailoredResume(BaseModel):
+    Before: Decimal
+    After: Decimal
+    Changes: str
+    TailoredResume: str
 
 class AirtableManager:
     def __init__(self):
@@ -20,11 +29,37 @@ class AirtableManager:
     def get_all_records(self) -> List[Dict]:
         """Fetch all records from Airtable."""
         try:
+
             return self.table.all()
         except Exception as e:
             logger.error(f"Error fetching records: {str(e)}", exc_info=True)
             return []
 
+    def get_all_records_by_customer(self, customer_email) -> List[Dict]:
+      
+        try:
+            formula = match({"customer_email_address": customer_email})
+            return self.table.all(formula=formula)
+        except Exception as e:
+            logger.error(f"Error fetching records: {str(e)}", exc_info=True)
+            return []
+    
+    def get_all_records_by_customer_today(self, customer_email) -> List[Dict]:
+      
+        try:
+            today_date = datetime.now().date().isoformat()  # Get today's date in ISO format
+            # Create a formula string to match the date part
+            formula_string = "AND({customer_email_address} = '{}', IS_SAME({createdDate}, '{}', 'day'))".format(customer_email, today_date)
+            #formula = match({
+            #"customer_email_address": customer_email,
+            #"createdDate": today_date
+            #})
+           
+            return self.table.all(formula=formula_string)
+        except Exception as e:
+            logger.error(f"Error fetching records: {str(e)}", exc_info=True)
+            return []
+        
     def get_new_records(self) -> List[Dict]:
         """Fetch records with 'new' status."""
         try:
@@ -42,20 +77,32 @@ class AirtableManager:
             logger.error(f"Error updating record: {str(e)}", exc_info=True)
             return {}
 
-    def add_new_record(self, job_profile: Dict) -> Dict:
-        """Add a new job profile record to Airtable."""
+    def add_new_record(self, job_profile: Dict, filename, customer_name, customer_email_address) -> Dict:
+   
         try:
+            resume_text = get_wordfile_markdown(filename)
             new_fields = {
-                "job_title": f"{job_profile['job_title']} at {job_profile['company_name']} in {job_profile['job_location']}",
+                "job_title": job_profile['job_title'],
                 "job_description": f"{job_profile['job_description']}",
                 "tailored_resume": "",
                 "status": "new",
                 "created_date": datetime.now().isoformat(),
+                'company_name': job_profile['company_name'],
+                'original_resume': resume_text,
+                'customer_name': customer_name,
+                'customer_email_address': customer_email_address,
+                'job_url':job_profile['job_url']
+
             }
             return self.table.create(new_fields)
         except Exception as e:
             logger.error(f"Error adding new record: {str(e)}", exc_info=True)
             return {}
+
+    def update_state_to_applied(self, selected_row):
+        selectedrow = selected_row
+        selectedrow["status"] = "applied"
+        return ""
 
 class LinkedInScraper:
     def __init__(self, llm):
@@ -63,19 +110,11 @@ class LinkedInScraper:
         self.username = Config.USERNAME
         self.password = Config.PASSWORD
         self.llm = llm
-        self.config = BrowserConfig(headless=True)
-        self.browser = Browser(config=self.config)
+        #self.config = BrowserConfig(headless=True)
+        #self.browser = Browser(config=self.config)
 
     async def run_job_search(self, job_count: int) -> Dict:
-        """
-        Run LinkedIn job search and return results.
-        
-        Args:
-            job_count: Number of jobs to scrape
-            
-        Returns:
-            Dict containing job information
-        """
+      
         try:
             task = JOB_SEARCH_PROMPT.format(
                 username=self.username,
@@ -105,25 +144,51 @@ class LinkedInScraper:
             return {}
 
 class ResumeGenerator:
+    
     def __init__(self, llm):
         """Initialize resume generator."""
         self.llm = llm
+        self.prompts = Prompts()
+    def clean_llm_response(self, response: str) -> dict:
+        try:
+            # Remove markdown code block indicators and newlines
+            cleaned = response.replace('```json', '').replace('```', '').strip()
+            # Parse the cleaned string into JSON
+            return json.loads(cleaned)
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse LLM response: {str(e)}")
+            return {"json_error"}
+
+    def generate_tailored_resume_markdown(
+        self, 
+        resume_filename: str, 
+        job_description: str,
+        prompts:Prompts
+    ) -> str:
+       
+        try:
+            new_prompt = prompts.get_tailoring_prompt()
+            resume_text = get_wordfile_markdown(resume_filename)
+            final_prompt = new_prompt.format(
+                resume_text=resume_text,
+                job_description=job_description
+            )
+            parser = PydanticOutputParser(pydantic_object=TailoredResume)
+            chain = self.llm | parser
+            #response = (self.llm.invoke(final_prompt).content)
+            response = chain.invoke(final_prompt)
+            return response
+        except Exception as e:
+            logger.error(f"Error generating resume: {str(e)}", exc_info=True)
+            return "error"
+        
 
     def generate_tailored_resume(
         self, 
         resume_filename: str, 
         job_description: str
     ) -> str:
-        """
-        Generate a tailored resume based on job description.
-        
-        Args:
-            resume_filename: Path to original resume
-            job_description: Job description to tailor resume for
-            
-        Returns:
-            str: Tailored resume content
-        """
+       
         try:
             resume_text = get_resume_text(resume_filename)
             final_prompt = TAILORING_PROMPT.format(

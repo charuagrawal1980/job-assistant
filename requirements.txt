@@ -6,3 +6,8 @@ langchain_openai
 langchain_google_genai
 pdfplumber
 gradio
+mammoth
+markdownify
+markdown
+spire.doc
+spire.doc.common
