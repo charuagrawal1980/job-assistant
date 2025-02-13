@@ -1,13 +1,12 @@
 import logging
 from datetime import datetime
-from fpdf import FPDF
+
 import pdfplumber
 import pandas as pd
 import mammoth
 import markdownify
 import markdown
-from spire.doc import *
-from spire.doc.common import *
+
 
 from docx import Document
 from docx.shared import Pt
@@ -27,10 +26,13 @@ def get_wordfile_markdown(filename)->str:
         return markdown
     
 def save_markdowntext_to_word(markdown_text, filename):
+    
     html_content = markdown.markdown(markdown_text)
     doc = Document()
     add_html_to_doc(doc, html_content)
-    doc.save(filename + ".docx")
+    output_file_path = f"{filename}.docx" 
+    path = doc.save(output_file_path)
+    return output_file_path
 
 def save_resume_to_pdf(text: str) -> str:
 

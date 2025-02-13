@@ -1,4 +1,16 @@
 
+class Prompts:
+   
+    def __init__(self):
+        
+      self.tailoring_prompt = TAILORING_PROMPT_1
+        
+    def get_tailoring_prompt(self):
+      return self.tailoring_prompt
+    
+    def update_tailoring_prompt(self,new_prompt):
+       self.tailoring_prompt=new_prompt
+
 TAILORING_PROMPT_1 = '''
 You are a very competent resume analyzer that generates resumes tailored to specific job profiles.
 

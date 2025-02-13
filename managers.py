@@ -7,11 +7,11 @@ import json
 from config import Config
 from utils import get_resume_text, get_wordfile_markdown
 from prompts import TAILORING_PROMPT, JOB_SEARCH_PROMPT, TAILORING_PROMPT_1
-from browser_use import BrowserConfig, Browser, Agent
+#from browser_use import BrowserConfig, Browser, Agent
 from langchain.output_parsers import PydanticOutputParser
 from langchain_core.pydantic_v1 import BaseModel, Field
 from decimal import Decimal
-
+from prompts import Prompts
 logger = logging.getLogger(__name__)
 
 class TailoredResume(BaseModel):
@@ -110,8 +110,8 @@ class LinkedInScraper:
         self.username = Config.USERNAME
         self.password = Config.PASSWORD
         self.llm = llm
-        self.config = BrowserConfig(headless=True)
-        self.browser = Browser(config=self.config)
+        #self.config = BrowserConfig(headless=True)
+        #self.browser = Browser(config=self.config)
 
     async def run_job_search(self, job_count: int) -> Dict:
       
@@ -144,11 +144,11 @@ class LinkedInScraper:
             return {}
 
 class ResumeGenerator:
-
+    
     def __init__(self, llm):
         """Initialize resume generator."""
         self.llm = llm
-
+        self.prompts = Prompts()
     def clean_llm_response(self, response: str) -> dict:
         try:
             # Remove markdown code block indicators and newlines
@@ -158,16 +158,18 @@ class ResumeGenerator:
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse LLM response: {str(e)}")
             return {"json_error"}
-        
+
     def generate_tailored_resume_markdown(
         self, 
         resume_filename: str, 
-        job_description: str
+        job_description: str,
+        prompts:Prompts
     ) -> str:
        
         try:
+            new_prompt = prompts.get_tailoring_prompt()
             resume_text = get_wordfile_markdown(resume_filename)
-            final_prompt = TAILORING_PROMPT_1.format(
+            final_prompt = new_prompt.format(
                 resume_text=resume_text,
                 job_description=job_description
             )
@@ -175,10 +177,6 @@ class ResumeGenerator:
             chain = self.llm | parser
             #response = (self.llm.invoke(final_prompt).content)
             response = chain.invoke(final_prompt)
-            #cleaned_response = self.clean_llm_response(response)
-            #if cleaned_response.values[0]=="json_error": 
-             #   response = (self.llm.invoke(final_prompt).content)
-              #  cleaned_response = self.clean_llm_response(response)
             return response
         except Exception as e:
             logger.error(f"Error generating resume: {str(e)}", exc_info=True)
