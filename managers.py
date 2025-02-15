@@ -12,13 +12,126 @@ from langchain.output_parsers import PydanticOutputParser
 from langchain_core.pydantic_v1 import BaseModel, Field
 from decimal import Decimal
 from prompts import Prompts
+import gspread
+import pandas as pd
+from oauth2client.service_account import ServiceAccountCredentials
+import uuid
+from crew import LatestAiDevelopmentCrew, TailoredResume
+
 logger = logging.getLogger(__name__)
 
-class TailoredResume(BaseModel):
-    Before: Decimal
-    After: Decimal
-    Changes: str
-    TailoredResume: str
+
+
+class SheetManager:
+    def __init__(self,client, sheetKey) -> None:
+       
+        sheet = client.open_by_key(sheetKey)
+        self.sheet_instance = sheet.get_worksheet(0)
+        
+    def get_all_records_by_customer(self, customer_email) -> List[Dict]:
+        """Fetch all records from Google sheets."""
+        try:
+            
+            all_records = self.sheet_instance.get_all_records()
+            filtered_data = [d for d in all_records if d['customer_email_address'] == customer_email]
+            return filtered_data
+        except Exception as e:
+            logger.error(f"Error fetching records: {str(e)}", exc_info=True)
+            return []
+        
+    def get_all_records(self) -> List[Dict]:
+        """Fetch all records from Google sheets."""
+        try:
+            
+            records_data = self.sheet_instance.get_all_records()
+            return records_data
+        except Exception as e:
+            logger.error(f"Error fetching records: {str(e)}", exc_info=True)
+            return []
+        
+    def get_all_records_for_tailoring(self) -> List[Dict]:
+        """Fetch records with 'new' status."""
+        try:
+            filtered_data=[]
+            all_records= self.sheet_instance.get_all_records()
+            for d in all_records:
+                status = d['status']
+                if status=='new':
+                    filtered_data.append(d)
+            return filtered_data#filtered_data = [d for d in all_records if d['status'] == 'new']
+        except Exception as e:
+            logger.error(f"Error fetching new records: {str(e)}", exc_info=True)
+            return []
+           
+    def add_new_record(self, job_profile: Dict, filename, customer_name, customer_email_address) -> Dict:
+            try:
+                new_record = self.create_new_record_data(job_profile, filename, customer_name,customer_email_address)
+                return self.sheet_instance.append_row (new_record)
+            except Exception as e:
+                logger.error(f"Error adding new record: {str(e)}", exc_info=True)
+                return {}
+            
+    def create_new_record_data(self,job_profile, filename, customer_name, customer_email_address):
+        resume_text = get_wordfile_markdown(filename)
+        new_fields = {
+                "record_id": str(uuid.uuid4()),
+                "job_title": job_profile['job_title'],
+                "job_description": f"{job_profile['job_description']}",
+                "tailored_resume": "",
+                "before":"",
+                "after":"",
+                "changes":"",
+                "status": "new",
+                "created_date": datetime.now().isoformat(),
+                'company_name': job_profile['company_name'],
+                'original_resume': resume_text,
+                'customer_name': customer_name,
+                'customer_email_address': customer_email_address,
+                'job_url':job_profile['job_url'],
+                'tailored_resume_filename':''
+
+            }
+        row_data = [new_fields["record_id"], new_fields["job_title"], new_fields["job_description"], new_fields["tailored_resume"],
+                    new_fields["before"], new_fields["after"], new_fields["changes"],
+                 new_fields["status"], new_fields["created_date"], new_fields['company_name'], new_fields['original_resume'],
+                   new_fields['customer_name'], new_fields['customer_email_address'], new_fields['job_url'], new_fields['tailored_resume_filename']]
+        return row_data
+    
+    def update_record(self, record_id, updated_fields):
+        """Update a specific record in the Google Sheet based on the given ID."""
+        try:
+            # Fetch all records from the sheet
+            all_records = self.sheet_instance.get_all_records()
+
+            # Find the index of the row with the matching ID
+            row_index = None
+            for i, record in enumerate(all_records):
+                if record['record_id'] == record_id:  # Assuming 'id' is the column name for the ID
+                    row_index = i + 2  # gspread uses 1-based indexing, and we skip the header row
+                    break
+
+            if row_index is not None:
+             
+                current_row = all_records[row_index - 2]  # Get the current row data
+
+                # Update the current row with new values from updated_fields
+                for key, value in updated_fields.items():
+                    if key in current_row:  # Only update if the key exists in the current row
+                        current_row[key] = value
+
+                # Prepare the data to be written back to the sheet
+                row_data = list(current_row.values())  # Convert the updated row back to a list
+
+                # Update the row in the sheet
+                self.sheet_instance.update(f'A{row_index}:O{row_index}', [row_data])  # Adjust the range as needed
+
+            else:
+                raise ValueError(f"Record with ID {record_id} not found.")
+
+        except Exception as e:
+            logger.error(f"Error updating record with ID {record_id}: {str(e)}", exc_info=True)
+    
+
 
 class AirtableManager:
     def __init__(self):
@@ -173,11 +286,14 @@ class ResumeGenerator:
                 resume_text=resume_text,
                 job_description=job_description
             )
-            parser = PydanticOutputParser(pydantic_object=TailoredResume)
-            chain = self.llm | parser
-            #response = (self.llm.invoke(final_prompt).content)
-            response = chain.invoke(final_prompt)
-            return response
+            crew = LatestAiDevelopmentCrew(resume_text, job_description)
+            output =crew.crew().kickoff().raw
+            clean_json_string = output.strip().rstrip("Processed after kickoff.'").strip("'")
+            #parser = PydanticOutputParser(pydantic_object=TailoredResume)
+            #chain = self.llm | parser
+            #response = chain.invoke(final_prompt)
+            out = json.loads(clean_json_string)
+            return out
         except Exception as e:
             logger.error(f"Error generating resume: {str(e)}", exc_info=True)
             return "error"
