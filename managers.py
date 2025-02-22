@@ -5,7 +5,7 @@ from pyairtable import Api
 from pyairtable.formulas import match
 import json
 from config import Config
-from utils import get_resume_text, get_wordfile_markdown
+from utils import get_resume_text, get_wordfile_markdown, get_resume_text_word
 from prompts import TAILORING_PROMPT, JOB_SEARCH_PROMPT, TAILORING_PROMPT_1
 #from browser_use import BrowserConfig, Browser, Agent
 from langchain.output_parsers import PydanticOutputParser
@@ -16,7 +16,7 @@ import gspread
 import pandas as pd
 from oauth2client.service_account import ServiceAccountCredentials
 import uuid
-from crew import LatestAiDevelopmentCrew, TailoredResume
+from crew import LatestAiDevelopmentCrew
 
 logger = logging.getLogger(__name__)
 
@@ -262,15 +262,54 @@ class ResumeGenerator:
         """Initialize resume generator."""
         self.llm = llm
         self.prompts = Prompts()
+    
     def clean_llm_response(self, response: str) -> dict:
+     try:
+        # Remove markdown code block indicators
+        cleaned_res = response.replace('```json', '').replace('```', '').strip()
+        cleaned_res = cleaned_res.strip().rstrip("Processed after kickoff.").strip()
+        
+        # Convert the string to a proper JSON string
+        # This handles escaping special characters and normalizing newlines
         try:
-            # Remove markdown code block indicators and newlines
-            cleaned = response.replace('```json', '').replace('```', '').strip()
-            # Parse the cleaned string into JSON
-            return json.loads(cleaned)
-        except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse LLM response: {str(e)}")
-            return {"json_error"}
+            # Parse the existing JSON first
+            data = json.loads(cleaned_res, strict=False)
+            
+            # Clean and normalize the text fields
+            if 'Changes' in data:
+                data['Changes'] = data['Changes'].replace('\n', '\\n')
+            if 'TailoredResume' in data:
+                # Normalize newlines and remove any control characters
+                resume_text = data['TailoredResume']
+                resume_text = resume_text.replace('\r\n', '\n').replace('\r', '\n')
+                resume_text = ''.join(char for char in resume_text if ord(char) >= 32 or char == '\n')
+                data['TailoredResume'] = resume_text
+            
+            # Convert to proper JSON string and parse again
+            cleaned_json = json.dumps(data)
+            return json.loads(cleaned_json, strict=False)
+            
+        except json.JSONDecodeError:
+            # If initial parsing fails, try more aggressive cleaning
+            import re
+            
+            # Remove any control characters except newlines
+            cleaned_res = ''.join(char for char in cleaned_res if ord(char) >= 32 or char == '\n')
+            
+            # Try to extract valid JSON
+            json_match = re.search(r'(\{.*\})', cleaned_res, re.DOTALL)
+            if json_match:
+                json_str = json_match.group(1)
+                # Parse and clean the extracted JSON
+                data = json.loads(json_str, strict=False)
+                return data
+            
+            raise ValueError("Could not extract valid JSON from response")
+            
+     except Exception as e:
+        logger.error(f"Failed to parse LLM response: {str(e)}\nResponse: {cleaned_res}")
+        return {"error": "json_parse_error"}
+    
 
     def generate_tailored_resume_markdown(
         self, 
@@ -281,22 +320,28 @@ class ResumeGenerator:
        
         try:
             new_prompt = prompts.get_tailoring_prompt()
+           # resume_text = get_resume_text_word(resume_filename)
             resume_text = get_wordfile_markdown(resume_filename)
             final_prompt = new_prompt.format(
                 resume_text=resume_text,
                 job_description=job_description
             )
             crew = LatestAiDevelopmentCrew(resume_text, job_description)
-            output =crew.crew().kickoff().raw
-            clean_json_string = output.strip().rstrip("Processed after kickoff.'").strip("'")
+            inputs = {
+                "resume_text": resume_text,
+                "job_description": job_description
+            }
+            output =crew.crew().kickoff(inputs).raw
+            
+            clean_json_string = self.clean_llm_response(output) #output.strip().rstrip("Processed after kickoff.'").strip("'")
             #parser = PydanticOutputParser(pydantic_object=TailoredResume)
             #chain = self.llm | parser
             #response = chain.invoke(final_prompt)
-            out = json.loads(clean_json_string)
-            return out
+            #out = json.loads(clean_json_string)
+            return clean_json_string
         except Exception as e:
             logger.error(f"Error generating resume: {str(e)}", exc_info=True)
-            return "error"
+            return "json_error"
         
 
     def generate_tailored_resume(
@@ -314,4 +359,4 @@ class ResumeGenerator:
             return self.llm.invoke(final_prompt).content
         except Exception as e:
             logger.error(f"Error generating resume: {str(e)}", exc_info=True)
-            return ""
+            return "json_error"

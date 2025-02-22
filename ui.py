@@ -192,7 +192,7 @@ class GradioUI:
         for record in new_records:
                 try:
                     
-                    #fields = record["fields"]
+                    updated_fields = {}#fields = record["fields"]
                     logger.info("Generating tailored resume for Count:{}".format(count)) 
                     if(isSheets):
                         job_description =record['job_description']
@@ -200,29 +200,28 @@ class GradioUI:
                          fields = record["fields"]
                          job_description = fields["job_description"]
                     tailored_response = self.resume_generator.generate_tailored_resume_markdown(resume_file, job_description, self.prompts)
-                    #tailored_response = self.resume_generator.generate_tailored_resume_markdown(
-                    #resume_file,fields["job_title"] + "\n" + fields["job_description"], self.prompts
-                    #)
+                    
                     logger.info("Finished generating tailored resume for job title:") 
-                    if tailored_response!="error":
+                    if tailored_response=="json_error":
+                        #logger.error("Error generating tailored resume for job title:{}. Trying again".format(fields["job_title"]))
+                        tailored_response = self.resume_generator.generate_tailored_resume_markdown(resume_file, job_description, self.prompts)
+                    if tailored_response!="json_error":
                         updated_fields = {
                         "tailored_resume": tailored_response['TailoredResume'],
                         "status": "resume_generated",
                         "resume_generated_date": datetime.now().isoformat(),
-                        "before": float(tailored_response['Before']),
-                        "after": float(tailored_response['After']),
+                        "before": tailored_response.get('Before'),
+                        "after": tailored_response.get('After'),
                         "changes":tailored_response['Changes'],
                         "tailored_resume_filename": self.get_file_name_for_tailored_resume(record) #fields["company_name"] + "_" + fields["job_title"]
                         
                         }
                         #logger.info("updating job title:{} record id:{}".format(record["id"], fields["job_title"]))
-                        self.update_tailored_resume(record, updated_fields)
-                        #self.airtable_manager.update_record(record["id"], updated_fields)
-                        #logger.info("Finished updating job title:{1} record id:{0}".format(record["id"], fields["job_title"]))
-                        count+=1
+                    self.update_tailored_resume(record, updated_fields)
+                    count+=1
                 except Exception as e:
                     logger.error(f"Error processing files: {str(e)}", exc_info=True)
-                    return f"Error: {str(e)}"
+                    #return f"Error: {str(e)}"
         logger.info("Process complete for email address:" + self.customer_email)        
         return "Process complete!"
     
