@@ -43,19 +43,10 @@ class LatestAiDevelopmentCrew():
   #os.environ["GEMINI_API_KEY"] = "AIzaSyDG_ROaq2XsXkUnSrbwl6Q8A56-M3ycRyo"
   gemini_llm = LLM(
        model="gemini/gemini-2.0-flash",
-       google_api_key="AIzaSyDG_ROaq2XsXkUnSrbwl6Q8A56-M3ycRyo",
+       google_api_key=os.environ["GEMINI_API_KEY"],
        #max_tokens=8192
        
    )
-  #gemini_llm = LLM(
-   # model="gpt-4o-mini",
-   # api_key="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"
-  #)
-  #gemini_llm = LLM(
-   # model="openrouter/deepseek/deepseek-r1",
-   # base_url="https://openrouter.ai/api/v1",
-   #api_key="sk-85d910d9206e403c8ed5ff45b87b08f8"
-  #)
  
   @agent
   def resume_tailor_manager(self) -> Agent:
