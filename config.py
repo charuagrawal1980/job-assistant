@@ -12,3 +12,4 @@ class Config:
     USERNAME = os.getenv("USERNAME")
     PASSWORD = os.getenv("PASSWORD")
     CREATIVITY_LEVEL = 0.3
+    CLAUDE_API_KEY= os.getenv("CLAUDE_API_KEY")

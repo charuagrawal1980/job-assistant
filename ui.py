@@ -6,7 +6,14 @@ from datetime import datetime
 from prompts import Prompts
 from utils import save_resume_to_pdf, save_markdowntext_to_word, download_all_resumes
 from utils import get_jobs_from_excel
+
+
 logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO, 
+                    format='%(asctime)s - %(levelname)s - %(message)s',
+                    datefmt='%Y-%m-%d %H:%M:%S')
+
+isSheets=True
 
 class GradioUI:
     full_df_state: pd.DataFrame
@@ -14,29 +21,42 @@ class GradioUI:
     selected_record_id: str
     customer_email :str
 
-    def __init__(self, airtable_manager, linkedin_scraper, resume_generator, prompts):
+    def __init__(self, airtable_manager, linkedin_scraper, resume_generator, prompts, sheet_manager):
         """Initialize Gradio UI components."""
         self.airtable_manager = airtable_manager
         self.linkedin_scraper = linkedin_scraper
         self.resume_generator = resume_generator
+        self.sheet_manager = sheet_manager
         self.selected_row = None
         self.customer_email = None
         self.prompts = prompts
-
-    def get_dashboard_data(self) -> Tuple[pd.DataFrame, pd.DataFrame]:
-       
-        try:
+    
+    def get_records(self):
+        records=None
+        if (isSheets):
+            if self.customer_email is None or len(self.customer_email)==0:
+                return self.sheet_manager.get_all_records()
+            else:
+                 records = self.sheet_manager.get_all_records_by_customer(self.customer_email)
+        else:
             if self.customer_email is None or len(self.customer_email)==0:
                 records = self.airtable_manager.get_all_records()
             else:
                  records = self.airtable_manager.get_all_records_by_customer(self.customer_email)
-            df = pd.DataFrame(columns=[
+        return records
+
+    def get_data_for_dataframe(self,records):
+        df = pd.DataFrame(columns=[
                 'record_id','customer_name', 'customer_email_address', 'job_title', 'job_url','resume_generated_date', 'original_resume','company_name',
                 'status', 'tailored_resume', 'before','after','changes', 'tailored_resume_filename', 'created_date', 
                 'job_description'
             ])
+        if(isSheets):
             
             for record in records:
+                df.loc[len(df)] = record
+        else:
+              for record in records:
                 fields = record["fields"]
                 row_data = {
                     'record_id': record["id"],
@@ -57,7 +77,14 @@ class GradioUI:
                     'job_url': fields.get('job_url')
                 }
                 df.loc[len(df)] = row_data
+        return df
+    
+    def get_dashboard_data(self) -> Tuple[pd.DataFrame, pd.DataFrame]:
+       
+        try:
             
+            records = self.get_records()
+            df= self.get_data_for_dataframe(records)
             # Create display DataFrame with hidden columns
             display_df = df[['company_name', 'job_title', 'job_url', 'before','after', 
                            'status', 'created_date', 'record_id']]
@@ -85,6 +112,44 @@ class GradioUI:
             self.selected_row.iloc[0]['job_url']
         )
 
+    def add_job_profile_records(self,job, resume_file, customer_name, customer_email):
+        if(isSheets):
+                self.sheet_manager.add_new_record(job, resume_file, customer_name, customer_email)
+        else:
+                 self.airtable_manager.add_new_record(job, resume_file, customer_name, customer_email)
+
+
+    def get_records_for_tailoring(self):
+         if (isSheets):
+            return self.sheet_manager.get_all_records_for_tailoring()
+         else:
+            return self.airtable_manager.get_new_records()
+    
+    def generate_tailored_resume(self,record, resume_file):
+         if(isSheets):
+            tailored_response = self.resume_generator.generate_tailored_resume_markdown(resume_file,
+                                                                                        record["job_title"] + "\n" + record["job_description"], self.prompts)
+               
+         else:
+            fields = record["fields"]
+            tailored_response = self.resume_generator.generate_tailored_resume_markdown(resume_file,
+                                                                                        fields["job_title"] + "\n" + fields["job_description"], self.prompts
+                    )
+            return tailored_response
+
+    def get_file_name_for_tailored_resume(self,record):   
+        if (isSheets):
+         return record["company_name"] + "_" +  record["job_title"]
+        else:
+            row = record["fields"]
+            return row["company_name"] + "_" + row["job_title"]
+
+    def update_tailored_resume(self,record, updated_fields):
+        if(isSheets):
+            self.sheet_manager.update_record(record["record_id"],updated_fields)
+        else:
+            self.airtable_manager.update_record(record["record_id"], updated_fields)
+  
     async def process_files(
         self, 
         resume_file: str, 
@@ -106,41 +171,58 @@ class GradioUI:
         gr.Info(f"""It might take a few mins to generate tailored resumes"\n
                 "You will see 'Process Complete' on the screen and then you can refresh the dashboard""")
         self.customer_email = customer_email
-    
+        logger.info("Starting the process for email:" + self.customer_email)
         jobs={}
         
         if job_search_type == "Search":
                 jobs = await self.linkedin_scraper.run_job_search(job_count)
                
         else:
+                
+                logger.info("Calling excel file to get jobs")
                 jobs = get_jobs_from_excel(excel_file)
+                logger.info("Got all excel jobs. Total Job Count:" + str(len(jobs)))
         for job in jobs:
-                    self.airtable_manager.add_new_record(job, resume_file, customer_name, customer_email)
-            
-        new_records = self.airtable_manager.get_new_records()
+                self.add_job_profile_records(job, resume_file, customer_name, customer_email)
+                  
+        logger.debug("Finished adding all original resume records to table:" + str(len(jobs)))    
+        new_records = self.get_records_for_tailoring()
+        #new_records = self.airtable_manager.get_new_records()
+        count=1
         for record in new_records:
                 try:
-                    fields = record["fields"]
-                    tailored_response = self.resume_generator.generate_tailored_resume_markdown(
-                    resume_file,fields["job_title"] + "\n" + fields["job_description"], self.prompts
-                    )
-                
-                    if tailored_response!="error":
+                    
+                    updated_fields = {}#fields = record["fields"]
+                    logger.info("Generating tailored resume for Count:{}".format(count)) 
+                    if(isSheets):
+                        job_description =record['job_description']
+                    else:
+                         fields = record["fields"]
+                         job_description = fields["job_description"]
+                    tailored_response = self.resume_generator.generate_tailored_resume_markdown(resume_file, job_description, self.prompts)
+                    
+                    logger.info("Finished generating tailored resume for job title:") 
+                    if tailored_response=="json_error":
+                        #logger.error("Error generating tailored resume for job title:{}. Trying again".format(fields["job_title"]))
+                        tailored_response = self.resume_generator.generate_tailored_resume_markdown(resume_file, job_description, self.prompts)
+                    if tailored_response!="json_error":
                         updated_fields = {
-                        "tailored_resume": tailored_response.TailoredResume,
+                        "tailored_resume": tailored_response['TailoredResume'],
                         "status": "resume_generated",
                         "resume_generated_date": datetime.now().isoformat(),
-                        "before": float(tailored_response.Before),
-                        "after": float(tailored_response.After),
-                        "changes":tailored_response.Changes,
-                        "tailored_resume_filename": fields["company_name"] + "_" + fields["job_title"]
+                        "before": tailored_response.get('Before'),
+                        "after": tailored_response.get('After'),
+                        "changes":tailored_response['Changes'],
+                        "tailored_resume_filename": self.get_file_name_for_tailored_resume(record) #fields["company_name"] + "_" + fields["job_title"]
                         
                         }
-                        self.airtable_manager.update_record(record["id"], updated_fields)
+                        #logger.info("updating job title:{} record id:{}".format(record["id"], fields["job_title"]))
+                    self.update_tailored_resume(record, updated_fields)
+                    count+=1
                 except Exception as e:
                     logger.error(f"Error processing files: {str(e)}", exc_info=True)
-                    return f"Error: {str(e)}"
-                
+                    #return f"Error: {str(e)}"
+        logger.info("Process complete for email address:" + self.customer_email)        
         return "Process complete!"
     
         
@@ -291,10 +373,12 @@ class GradioUI:
                     "status":"applied"
                         
                         }
-            self.airtable_manager.update_record(self.selected_record_id, updated_fields)
+            if(isSheets):
+                self.sheet_manager.update_record(self.selected_record_id, updated_fields)
+            else:
+                self.airtable_manager.update_record(self.selected_record_id, updated_fields)
             self.get_dashboard_data()
-            # Call the update function with the selected row
-            #self.airtable_manager.update_state_to_applied(self.selected_row)
+           
         else:
             # Handle the case where no row is selected
             logger.warning("No row selected to update the status.")

@@ -25,11 +25,18 @@ def get_wordfile_markdown(filename)->str:
         markdown = markdownify.markdownify(html)
         return markdown
     
+def get_resume_text_word(filename)->str:
+    with open(filename, "rb") as docx_file:
+        result = mammoth.extract_raw_text(docx_file)
+        return result.value
+
 def save_markdowntext_to_word(markdown_text, filename):
     
     html_content = markdown.markdown(markdown_text)
     doc = Document()
     add_html_to_doc(doc, html_content)
+    style = doc.styles['Normal']
+    style.font.size = Pt(10)
     output_file_path = f"{filename}.docx" 
     path = doc.save(output_file_path)
     return output_file_path

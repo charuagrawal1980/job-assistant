@@ -1,0 +1,130 @@
+resume_manager_task:
+  description: >
+    You are a highly skilled resume analyzer specializing in tailoring resumes to job profiles while maintaining authenticity.
+    You will be provided with:
+    - The original resume before tailoring - {resume_text}
+    - The job description - {job_description}
+    - The tailored skills section from the previous task
+    - The tailored professional experience section from the previous task
+    Your job is to take the original resume and do the following:
+      - Replace the skills section with the tailored skills section from the previous task
+      - Replace the professional experience section with the tailored professional experience section from the previous task
+      - Retain all other sections of the original resume
+      - Do not make any changes to the original resume except for the skills and professional experience sections
+      - Calculate the ATS matching score of the final tailored resume and original resume
+      - Return the output in the following json dict format:
+      
+          "Before": 0.65,
+          "After": 0.85,
+          "Changes": "Added keywords for ATS. Improved job descriptions.",
+          "TailoredResume": "Full resume text here."
+        
+
+  expected_output: |
+    Return your response as a JSON dict with following keys. Do not include any other text or comments: 
+          "Before": 0.65,
+          "After": 0.85,
+          "Changes": "Added keywords for ATS. Improved job descriptions.",
+          "TailoredResume": "Full resume text here."
+
+  context: ["tailor_skills_task", "tailor_professional_experience_task"]
+
+tailor_skills_task:
+  description: >
+    Your task is to tailor the Skills section to match the job description without fabricating information.
+    You will be provided with:
+    - The original resume - {resume_text}
+    - The job description - {job_description}
+  instructions: |
+    Steps to tailor the Skills section:
+    1. Identify required skills from the job description
+    2. Prioritize and reorganize skills based on relevance
+    3. Ensure all listed skills are justifiable by existing experience
+    4. If a relevant skill is missing but can be inferred from experience, include it
+    5. Do not remove unrelated skills unless explicitly irrelevant
+
+  expected_output: "Tailored skills section (only this section)"
+
+tailor_professional_experience_task:
+  description: >
+    Your task is to refine and tailor each professional experience entry in the resume 
+    to maximize relevance to the target job description.
+    You will receive:
+    - {resume_text}: The original resume text from the previous task
+    - {job_description}: The target job description from the previous task
+  instructions: |
+    Steps:
+    1. **Extract job responsibilities and qualifications** from the job description.
+    2. **Iterate through each experience entry in the resume**, breaking it down into:
+        - **Key responsibilities**: Ensure these align with the job requirements.
+        - **Accomplishments & impact**: Emphasize measurable outcomes where possible.
+        - **Skills demonstrated**: Highlight relevant technical or leadership skills.
+    3. **Rephrase each entry to:** 
+        - Improve clarity and impact while maintaining authenticity.
+        - Ensure strong alignment with job responsibilities and qualifications.
+        - Remove redundancy and make descriptions more results-driven.
+    4. **Ensure consistency in phrasing and tone** across different job entries.
+    5. **Preserve the original number of experience entries**:
+    6.  For NON-RELEVANT experiences:
+          * Keep only: Company name, Job title, Location, and Dates
+          * Remove detailed bullet points
+          * Format as single line: "{Company} | {Title} | {Location} ({Dates})"
+    7. **DO NOT and I repeat DO NOT add any information that cannot be inferred from the original resume**
+    Rules:
+    - Only modify existing experience entries from resume_text
+    - DO NOT and I repeat DO NOT add any information that cannot be inferred from the original resume
+
+
+    Input fields:
+    - resume_text: The original resume to modify
+    - job_description: The target job requirements from previous task
+
+  expected_output: "Tailored professional experience section (only this section)"
+  context: ["tailor_skills_task"]
+
+resume_review_task:
+  description: >
+    You are a meticulous resume reviewer ensuring quality, ATS friendliness, and job relevance.
+
+  instructions: |
+    Review the generated tailored resume based on:
+    - Alignment with the job description.
+    - ATS optimization.
+    - Length consistency (within ±5% of original word count).
+    - Readability and formatting.
+
+    Analyze the tailored resume against the job description and provide feedback on how it can be improved further.
+
+  expected_output: |
+    Return your response a list of suggestions to further improve the tailored resume. If you think the resume is already good, just return an empty list.
+  context: ["resume_manager_task"]
+
+final_resume_generator_task:
+  description: >
+    Generate the final polished resume based on reviewer feedback. 
+    You will be provide with the output from resume_manager_task and resume_review_task. The output from resume_manager_task is a json dict with the following keys:
+    - Before: ATS match score before tailoring (0-1)
+    - After: # ATS match score after tailoring (0-1)
+    - Changes: string describing key modifications
+    - TailoredResume: tailored resume text
+    Modify the value for "TailoredResume"of the output from resume_manager_task with the feedback from resume_review_task.
+    Return the modified json dict as the output.
+
+  instructions: |
+    You will be provide with the output from resume_manager_task and resume_review_task. The output from resume_manager_task is a json dict with the following keys:
+    - Before: ATS match score before tailoring (0-1)
+    - After: # ATS match score after tailoring (0-1)
+    - Changes: string describing key modifications
+    - TailoredResume: tailored resume text
+    Modify the value for "TailoredResume" of the output from resume_manager_task with the feedback from resume_review_task.
+    Return the modified json dict as the output.
+
+  expected_output: |
+    Return your response as a JSON dict with following keys. Do not include any other text or comments: 
+    
+      "Before": ATS match score before tailoring (0-1)
+      "After": # ATS match score after tailoring (0-1)
+      "Changes": string describing key modifications
+      "TailoredResume": tailored resume text"Final tailored resume after the review comments"
+
+  context: ["resume_review_task", "resume_manager_task"]
